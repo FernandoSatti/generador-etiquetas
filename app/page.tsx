@@ -28,10 +28,10 @@ export default function PriceLabelGenerator() {
   const [selectedProducts, setSelectedProducts] = useState<Set<number>>(new Set())
   const [isProductsExpanded, setIsProductsExpanded] = useState(false)
 
-  const [labelWidth, setLabelWidth] = useState(6)
-  const [labelHeight, setLabelHeight] = useState(3.5)
-  const [priceFontSize, setPriceFontSize] = useState(1.8)
-  const [nameFontSize, setNameFontSize] = useState(0.5)
+  const [labelWidth, setLabelWidth] = useState(7)
+  const [labelHeight, setLabelHeight] = useState(4)
+  const [priceFontSize, setPriceFontSize] = useState(3)
+  const [nameFontSize, setNameFontSize] = useState(1)
 
   const [mode, setMode] = useState<"normal" | "differences">("normal")
   const [oldListInput, setOldListInput] = useState("")
@@ -895,61 +895,83 @@ export default function PriceLabelGenerator() {
         )}
       </div>
 
-    {products.length > 0 && (
+     {products.length > 0 && (
         <div className="print:block">
           <div className="grid grid-cols-3 gap-0 p-4">
-            {products.map((product, index) => (
-              <div
-                key={index}
-                className="relative border-2 flex flex-col"
-                style={{
-                  width: "6cm",
-                  height: "3.5cm", // ← manejar alto de caja
-                  borderColor: color,
-                  padding: "0.3cm",
-                  pageBreakInside: "avoid",
-                }}
-              >
-                <div className="text-xs font-medium absolute top-1 left-2" style={{ color }}>
-                  {product.code}
-                </div>
-                {product.discount && (
-                  <div
-                    className="text-xs font-bold absolute top-1 right-2 px-1 rounded"
-                    style={{
-                      backgroundColor: color,
-                      color: "#fff",
-                    }}
-                  >
-                    -{product.discount}%
-                  </div>
-                )}
-                <div className="flex-1 flex items-center justify-center">
-                  <div
-                    className="font-bold text-center leading-none"
-                    style={{
-                      color,
-                      fontSize: "3rem", // ← más grande el precio
-                      lineHeight: 1,        // ← evita que “salte”
-                      whiteSpace: "nowrap", // ← evita que se parta en dos líneas
-                    }}
-                  >
-                    ${product.price}
-                  </div>
-                </div>
-
+            {filteredProducts.map(({ product, index }) => {
+              const diffInfo = getDifferenceInfo(product.code)
+              return (
                 <div
-                  className="text-center font-medium uppercase"
+                  key={index}
+                  className="relative border-2 flex flex-col"
                   style={{
-                    fontSize: "0.9rem", // ← tamaño del nombre del producto”
-                    lineHeight: "1.1",
-                    color: "#000",
+                    width: `${labelWidth}cm`,
+                    height: `${labelHeight}cm`,
+                    borderColor: color,
+                    padding: "0.3cm",
+                    pageBreakInside: "avoid",
                   }}
                 >
-                  {product.name}
+                  <div className="text-xs font-medium absolute top-1 left-2" style={{ color }}>
+                    {product.code}
+                  </div>
+
+                  {product.discount && (
+                    <div
+                      className="text-xs font-bold absolute top-1 right-2 px-1 rounded"
+                      style={{
+                        backgroundColor: color,
+                        color: "#fff",
+                      }}
+                    >
+                      -{product.discount}%
+                    </div>
+                  )}
+
+                  {mode === "differences" && diffInfo && (
+                    <div
+                      className="text-xs font-bold absolute top-1 right-2 px-1 rounded"
+                      style={{
+                        backgroundColor: diffInfo.changeType === "new" ? "#10b981" : "#f59e0b",
+                        color: "#fff",
+                      }}
+                    >
+                      {diffInfo.changeType === "new" ? "NUEVO" : "PRECIO"}
+                    </div>
+                  )}
+
+                  <div className="flex-1 flex items-center justify-center">
+                    <div
+                      className="font-bold text-center leading-none"
+                      style={{
+                        color,
+                        fontSize: `${priceFontSize}rem`,
+                      }}
+                    >
+                      $ {product.price}
+                    </div>
+                  </div>
+
+                  {mode === "differences" &&
+                    diffInfo &&
+                    diffInfo.changeType === "price-change" &&
+                    diffInfo.oldPrice && (
+                      <div className="text-center text-xs line-through text-gray-500 mb-1">$ {diffInfo.oldPrice}</div>
+                    )}
+
+                  <div
+                    className="text-center font-medium uppercase"
+                    style={{
+                      fontSize: `${nameFontSize}rem`,
+                      lineHeight: "1.1",
+                      color: "#000",
+                    }}
+                  >
+                    {product.name}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}
