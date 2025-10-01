@@ -14,6 +14,12 @@ interface Product {
   discount?: number
 }
 
+interface ProductDifference {
+  product: Product
+  changeType: "new" | "price-change"
+  oldPrice?: string
+}
+
 export default function PriceLabelGenerator() {
   const [input, setInput] = useState("")
   const [products, setProducts] = useState<Product[]>([])
@@ -21,6 +27,16 @@ export default function PriceLabelGenerator() {
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedProducts, setSelectedProducts] = useState<Set<number>>(new Set())
   const [isProductsExpanded, setIsProductsExpanded] = useState(false)
+
+  const [labelWidth, setLabelWidth] = useState(6)
+  const [labelHeight, setLabelHeight] = useState(3.5)
+  const [priceFontSize, setPriceFontSize] = useState(1.8)
+  const [nameFontSize, setNameFontSize] = useState(0.5)
+
+  const [mode, setMode] = useState<"normal" | "differences">("normal")
+  const [oldListInput, setOldListInput] = useState("")
+  const [newListInput, setNewListInput] = useState("")
+  const [differences, setDifferences] = useState<ProductDifference[]>([])
 
   const parseProducts = (text: string) => {
     const lines = text.trim().split("\n")
@@ -44,7 +60,39 @@ export default function PriceLabelGenerator() {
       }
     })
 
-    setProducts(parsed)
+    return parsed
+  }
+
+  const compareLists = () => {
+    const oldProducts = parseProducts(oldListInput)
+    const newProducts = parseProducts(newListInput)
+
+    const oldProductsMap = new Map<string, Product>()
+    oldProducts.forEach((product) => {
+      oldProductsMap.set(product.code, product)
+    })
+
+    const foundDifferences: ProductDifference[] = []
+
+    newProducts.forEach((newProduct) => {
+      const oldProduct = oldProductsMap.get(newProduct.code)
+
+      if (!oldProduct) {
+        foundDifferences.push({
+          product: newProduct,
+          changeType: "new",
+        })
+      } else if (oldProduct.price !== newProduct.price) {
+        foundDifferences.push({
+          product: newProduct,
+          changeType: "price-change",
+          oldPrice: oldProduct.price,
+        })
+      }
+    })
+
+    setDifferences(foundDifferences)
+    setProducts(foundDifferences.map((d) => d.product))
     setSelectedProducts(new Set())
     setSearchTerm("")
   }
@@ -103,26 +151,23 @@ export default function PriceLabelGenerator() {
     setSelectedProducts(new Set())
   }
 
-  const clearDiscounts = () => {
-    const updatedProducts = products.map((product) => ({
-      code: product.code,
-      name: product.name,
-      price: product.originalPrice || product.price,
-    }))
-    setProducts(updatedProducts)
-    setSelectedProducts(new Set())
-  }
-
   const resetAll = () => {
     setInput("")
     setProducts([])
     setSelectedProducts(new Set())
     setSearchTerm("")
     setIsProductsExpanded(false)
+    setOldListInput("")
+    setNewListInput("")
+    setDifferences([])
+    setMode("normal")
   }
 
   const handleGenerate = () => {
-    parseProducts(input)
+    const parsed = parseProducts(input)
+    setProducts(parsed)
+    setSelectedProducts(new Set())
+    setSearchTerm("")
   }
 
   const handlePrint = () => {
@@ -130,6 +175,40 @@ export default function PriceLabelGenerator() {
   }
 
   const productsWithDiscount = products.filter((p) => p.discount).length
+
+  const removeDiscountFromSelected = () => {
+    const updatedProducts = products.map((product, index) => {
+      if (selectedProducts.has(index) && product.discount) {
+        return {
+          code: product.code,
+          name: product.name,
+          price: product.originalPrice || product.price,
+        }
+      }
+      return product
+    })
+    setProducts(updatedProducts)
+    setSelectedProducts(new Set())
+  }
+
+  const getDifferenceInfo = (productCode: string): ProductDifference | undefined => {
+    return differences.find((d) => d.product.code === productCode)
+  }
+
+  const exportToExcel = () => {
+    const exportText = products
+      .map((product) => {
+        const paddedCode = product.code.padEnd(20, " ")
+        const paddedName = product.name.padEnd(45, " ")
+        const priceWithDecimals = `${product.price},00`
+        return `${paddedCode}${paddedName}${priceWithDecimals}`
+      })
+      .join("\n")
+
+    navigator.clipboard.writeText(exportText).then(() => {
+      alert("Lista copiada al portapapeles! Ahora puedes pegarla en Excel o en 'Lista Antigua'")
+    })
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -162,33 +241,334 @@ export default function PriceLabelGenerator() {
           <p className="text-muted-foreground">Crea etiquetas profesionales para tu negocio</p>
         </div>
 
+        <div className="mb-6 flex gap-2 border-b">
+          <button
+            onClick={() => setMode("normal")}
+            className={`px-6 py-3 font-medium transition-colors border-b-2 ${
+              mode === "normal"
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Modo Normal
+          </button>
+          <button
+            onClick={() => setMode("differences")}
+            className={`px-6 py-3 font-medium transition-colors border-b-2 ${
+              mode === "differences"
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Ver Diferencias
+          </button>
+        </div>
+
         <div className="space-y-8">
-          {/* Input Section */}
-          <div className="bg-card border rounded-lg p-6 shadow-sm">
-            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 20h9" />
-                <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-              </svg>
-              Datos de Productos
-            </h2>
-            <Textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Pega tu lista aquí. Ejemplo:&#10;22              AMARGO OBRERO 750CC                      4.500,00&#10;26              AMERICANO  GANCIA 950CC                  6.500,00"
-              className="min-h-[200px] font-mono text-sm"
-            />
-          </div>
+          {mode === "normal" ? (
+            <>
+              {/* Input Section */}
+              <div className="bg-card border rounded-lg p-6 shadow-sm">
+                <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                  </svg>
+                  Datos de Productos
+                </h2>
+                <Textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder="Pega tu lista aquí. Ejemplo:&#10;22              AMARGO OBRERO 750CC                      4.500,00&#10;26              AMERICANO  GANCIA 950CC                  6.500,00"
+                  className="min-h-[200px] font-mono text-sm"
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 flex-wrap">
+                <Button onClick={handleGenerate} size="lg" className="flex items-center gap-2">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+                    <path d="M21 3v5h-5" />
+                  </svg>
+                  Generar Etiquetas
+                </Button>
+                {products.length > 0 && (
+                  <>
+                    <Button
+                      onClick={handlePrint}
+                      variant="outline"
+                      size="lg"
+                      className="flex items-center gap-2 bg-transparent"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                        <path d="M6 9V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6" />
+                        <rect x="6" y="14" width="12" height="8" rx="1" />
+                      </svg>
+                      Imprimir
+                    </Button>
+                    <Button
+                      onClick={exportToExcel}
+                      variant="outline"
+                      size="lg"
+                      className="flex items-center gap-2 bg-transparent"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="7 10 12 15 17 10" />
+                        <line x1="12" x2="12" y1="15" y2="3" />
+                      </svg>
+                      Exportar Lista
+                    </Button>
+                    <Button
+                      onClick={resetAll}
+                      variant="outline"
+                      size="lg"
+                      className="flex items-center gap-2 bg-transparent"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M3 6h18" />
+                        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                      </svg>
+                      Limpiar Todo
+                    </Button>
+                  </>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="bg-card border rounded-lg p-6 shadow-sm">
+                <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
+                  </svg>
+                  Comparar Listas
+                </h2>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Compara dos listas para encontrar productos nuevos o con cambios de precio. Solo se generarán
+                  etiquetas para los productos que cambiaron.
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Lista Antigua (semana pasada)</label>
+                    <Textarea
+                      value={oldListInput}
+                      onChange={(e) => setOldListInput(e.target.value)}
+                      placeholder="Pega la lista antigua aquí..."
+                      className="min-h-[200px] font-mono text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Lista Nueva (esta semana)</label>
+                    <Textarea
+                      value={newListInput}
+                      onChange={(e) => setNewListInput(e.target.value)}
+                      placeholder="Pega la lista nueva aquí..."
+                      className="min-h-[200px] font-mono text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons for Differences Mode */}
+              <div className="flex gap-3 flex-wrap">
+                <Button onClick={compareLists} size="lg" className="flex items-center gap-2">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
+                  </svg>
+                  Comparar y Generar
+                </Button>
+                {products.length > 0 && (
+                  <>
+                    <Button
+                      onClick={handlePrint}
+                      variant="outline"
+                      size="lg"
+                      className="flex items-center gap-2 bg-transparent"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                        <path d="M6 9V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6" />
+                        <rect x="6" y="14" width="12" height="8" rx="1" />
+                      </svg>
+                      Imprimir
+                    </Button>
+                    <Button
+                      onClick={exportToExcel}
+                      variant="outline"
+                      size="lg"
+                      className="flex items-center gap-2 bg-transparent"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="7 10 12 15 17 10" />
+                        <line x1="12" x2="12" y1="15" y2="3" />
+                      </svg>
+                      Exportar Lista
+                    </Button>
+                    <Button
+                      onClick={resetAll}
+                      variant="outline"
+                      size="lg"
+                      className="flex items-center gap-2 bg-transparent"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M3 6h18" />
+                        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                      </svg>
+                      Limpiar Todo
+                    </Button>
+                  </>
+                )}
+              </div>
+
+              {differences.length > 0 && (
+                <div className="bg-blue-50 dark:bg-blue-950 border-2 border-blue-200 dark:border-blue-800 rounded-lg p-6">
+                  <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="text-blue-600"
+                    >
+                      <circle cx="12" cy="12" r="10" />
+                      <path d="M12 16v-4M12 8h.01" />
+                    </svg>
+                    Resumen de Diferencias
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-white dark:bg-gray-900 rounded-lg p-4">
+                      <div className="text-sm text-muted-foreground mb-1">Total de cambios</div>
+                      <div className="text-2xl font-bold text-blue-600">{differences.length}</div>
+                    </div>
+                    <div className="bg-white dark:bg-gray-900 rounded-lg p-4">
+                      <div className="text-sm text-muted-foreground mb-1">Productos nuevos</div>
+                      <div className="text-2xl font-bold text-green-600">
+                        {differences.filter((d) => d.changeType === "new").length}
+                      </div>
+                    </div>
+                    <div className="bg-white dark:bg-gray-900 rounded-lg p-4">
+                      <div className="text-sm text-muted-foreground mb-1">Cambios de precio</div>
+                      <div className="text-2xl font-bold text-orange-600">
+                        {differences.filter((d) => d.changeType === "price-change").length}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
 
           {/* Settings Section */}
           <div className="bg-card border rounded-lg p-6 shadow-sm">
@@ -204,12 +584,12 @@ export default function PriceLabelGenerator() {
                 strokeLinecap="round"
                 strokeLinejoin="round"
               >
-                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0-2.73.73l-.15-.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0-.73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0-2.73.73l-.15-.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
                 <circle cx="12" cy="12" r="3" />
               </svg>
               Configuración
             </h2>
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div>
                 <label className="block text-sm font-medium mb-3">Color de las etiquetas:</label>
                 <div className="flex gap-3">
@@ -231,78 +611,61 @@ export default function PriceLabelGenerator() {
                   </Button>
                 </div>
               </div>
-            </div>
-          </div>
 
-          {/* Action Buttons */}
-          <div className="flex gap-3 flex-wrap">
-            <Button onClick={handleGenerate} size="lg" className="flex items-center gap-2">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
-                <path d="M21 3v5h-5" />
-              </svg>
-              Generar Etiquetas
-            </Button>
-            {products.length > 0 && (
-              <>
-                <Button
-                  onClick={handlePrint}
-                  variant="outline"
-                  size="lg"
-                  className="flex items-center gap-2 bg-transparent"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
-                    <path d="M6 9V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6" />
-                    <rect x="6" y="14" width="12" height="8" rx="1" />
-                  </svg>
-                  Imprimir
-                </Button>
-                <Button
-                  onClick={resetAll}
-                  variant="outline"
-                  size="lg"
-                  className="flex items-center gap-2 bg-transparent"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M3 6h18" />
-                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-                  </svg>
-                  Limpiar Todo
-                </Button>
-              </>
-            )}
+              <div className="border-t pt-6">
+                <label className="block text-sm font-medium mb-4">Dimensiones de las etiquetas:</label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-2">Ancho (cm)</label>
+                    <Input
+                      type="number"
+                      value={labelWidth}
+                      onChange={(e) => setLabelWidth(Number(e.target.value))}
+                      min="1"
+                      max="20"
+                      step="0.1"
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-2">Alto (cm)</label>
+                    <Input
+                      type="number"
+                      value={labelHeight}
+                      onChange={(e) => setLabelHeight(Number(e.target.value))}
+                      min="1"
+                      max="20"
+                      step="0.1"
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-2">Tamaño precio (rem)</label>
+                    <Input
+                      type="number"
+                      value={priceFontSize}
+                      onChange={(e) => setPriceFontSize(Number(e.target.value))}
+                      min="0.5"
+                      max="5"
+                      step="0.1"
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-2">Tamaño nombre (rem)</label>
+                    <Input
+                      type="number"
+                      value={nameFontSize}
+                      onChange={(e) => setNameFontSize(Number(e.target.value))}
+                      min="0.1"
+                      max="2"
+                      step="0.05"
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -409,8 +772,8 @@ export default function PriceLabelGenerator() {
                   >
                     -20% Descuento
                   </Button>
-                  <Button onClick={clearDiscounts} variant="outline" size="lg">
-                    Resetear Descuentos
+                  <Button onClick={removeDiscountFromSelected} variant="outline" size="lg">
+                    Quitar Descuento
                   </Button>
                 </div>
               </div>
@@ -510,7 +873,7 @@ export default function PriceLabelGenerator() {
         )}
 
         {/* Empty State */}
-        {products.length === 0 && input === "" && (
+        {products.length === 0 && input === "" && mode === "normal" && (
           <div className="mt-12 text-center py-12 bg-muted/30 rounded-lg border-2 border-dashed">
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -541,7 +904,7 @@ export default function PriceLabelGenerator() {
                 className="relative border-2 flex flex-col"
                 style={{
                   width: "6cm",
-                  height: "3cm", // ← manejar alto de caja
+                  height: "3.5cm", // ← manejar alto de caja
                   borderColor: color,
                   padding: "0.3cm",
                   pageBreakInside: "avoid",
