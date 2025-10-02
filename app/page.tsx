@@ -28,10 +28,15 @@ export default function PriceLabelGenerator() {
   const [selectedProducts, setSelectedProducts] = useState<Set<number>>(new Set())
   const [isProductsExpanded, setIsProductsExpanded] = useState(false)
 
-  const [labelWidth, setLabelWidth] = useState(7)
-  const [labelHeight, setLabelHeight] = useState(4)
+  const [labelWidth, setLabelWidth] = useState(6)
+  const [labelHeight, setLabelHeight] = useState(3.5)
   const [priceFontSize, setPriceFontSize] = useState(3)
-  const [nameFontSize, setNameFontSize] = useState(1)
+  const [nameFontSize, setNameFontSize] = useState(0.9)
+
+  const [showOriginalPrice, setShowOriginalPrice] = useState(false)
+  const [strikethroughOriginalPrice, setStrikethroughOriginalPrice] = useState(true)
+  const [originalPriceFontSize, setOriginalPriceFontSize] = useState(0.9)
+  const [originalPriceSpacing, setOriginalPriceSpacing] = useState(0.1)
 
   const [mode, setMode] = useState<"normal" | "differences">("normal")
   const [oldListInput, setOldListInput] = useState("")
@@ -540,10 +545,9 @@ export default function PriceLabelGenerator() {
                       strokeWidth="2"
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      className="text-blue-600"
+                      className={`transition-transform ${isProductsExpanded ? "rotate-180" : ""}`}
                     >
-                      <circle cx="12" cy="12" r="10" />
-                      <path d="M12 16v-4M12 8h.01" />
+                      <path d="m6 9 6 6 6-6" />
                     </svg>
                     Resumen de Diferencias
                   </h3>
@@ -665,6 +669,71 @@ export default function PriceLabelGenerator() {
                   </div>
                 </div>
               </div>
+
+              {mode === "normal" && (
+                <div className="border-t pt-6">
+                  <label className="block text-sm font-medium mb-3">Opciones de Ofertas:</label>
+                  <div className="flex items-center gap-3 mb-3">
+                    <Checkbox
+                      id="show-original-price"
+                      checked={showOriginalPrice}
+                      onCheckedChange={(checked) => setShowOriginalPrice(checked as boolean)}
+                    />
+                    <label htmlFor="show-original-price" className="text-sm cursor-pointer">
+                      Mostrar precio original en productos con descuento
+                    </label>
+                  </div>
+
+                  {showOriginalPrice && (
+                    <div className="ml-6 pl-4 border-l-2 border-muted space-y-4">
+                      <div className="flex items-center gap-3">
+                        <Checkbox
+                          id="strikethrough-original"
+                          checked={strikethroughOriginalPrice}
+                          onCheckedChange={(checked) => setStrikethroughOriginalPrice(checked as boolean)}
+                        />
+                        <label htmlFor="strikethrough-original" className="text-sm cursor-pointer">
+                          Tachar precio original
+                        </label>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs text-muted-foreground mb-2">
+                            Tamaño precio original (rem)
+                          </label>
+                          <Input
+                            type="number"
+                            value={originalPriceFontSize}
+                            onChange={(e) => setOriginalPriceFontSize(Number(e.target.value))}
+                            min="0.3"
+                            max="2"
+                            step="0.1"
+                            className="w-full"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-muted-foreground mb-2">Espaciado inferior (rem)</label>
+                          <Input
+                            type="number"
+                            value={originalPriceSpacing}
+                            onChange={(e) => setOriginalPriceSpacing(Number(e.target.value))}
+                            min="0"
+                            max="1"
+                            step="0.05"
+                            className="w-full"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Cuando está activado, las etiquetas con descuento mostrarán el precio original arriba del precio con
+                    descuento
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -853,10 +922,10 @@ export default function PriceLabelGenerator() {
                       </div>
                       <div className="text-sm">
                         {product.discount && product.originalPrice && (
-                          <span className="line-through text-muted-foreground mr-2">$ {product.originalPrice}</span>
+                          <span className="line-through text-muted-foreground mr-2">${product.originalPrice}</span>
                         )}
                         <span className={`font-bold ${product.discount ? "text-green-600" : ""}`}>
-                          $ {product.price}
+                          ${product.price}
                         </span>
                         {product.discount && (
                           <span className="ml-2 text-xs bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 px-2 py-0.5 rounded-full font-semibold">
@@ -895,7 +964,7 @@ export default function PriceLabelGenerator() {
         )}
       </div>
 
-     {products.length > 0 && (
+      {products.length > 0 && (
         <div className="print:block">
           <div className="grid grid-cols-3 gap-0 p-4">
             {filteredProducts.map(({ product, index }) => {
@@ -940,7 +1009,19 @@ export default function PriceLabelGenerator() {
                     </div>
                   )}
 
-                  <div className="flex-1 flex items-center justify-center">
+                  <div className="flex-1 flex flex-col items-center justify-center">
+                    {showOriginalPrice && product.discount && product.originalPrice && (
+                      <div
+                        className={`text-center mb-1 ${strikethroughOriginalPrice ? "line-through" : ""}`}
+                        style={{
+                          color: "#9ca3af",
+                          fontSize: `${originalPriceFontSize}rem`,
+                          marginBottom: `${originalPriceSpacing}rem`,
+                        }}
+                      >
+                        ${product.originalPrice}
+                      </div>
+                    )}
                     <div
                       className="font-bold text-center leading-none"
                       style={{
@@ -948,16 +1029,9 @@ export default function PriceLabelGenerator() {
                         fontSize: `${priceFontSize}rem`,
                       }}
                     >
-                      $ {product.price}
+                      ${product.price}
                     </div>
                   </div>
-
-                  {mode === "differences" &&
-                    diffInfo &&
-                    diffInfo.changeType === "price-change" &&
-                    diffInfo.oldPrice && (
-                      <div className="text-center text-xs line-through text-gray-500 mb-1">$ {diffInfo.oldPrice}</div>
-                    )}
 
                   <div
                     className="text-center font-medium uppercase"
