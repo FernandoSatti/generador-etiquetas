@@ -36,7 +36,9 @@ export default function PriceLabelGenerator() {
   const [showOriginalPrice, setShowOriginalPrice] = useState(false)
   const [strikethroughOriginalPrice, setStrikethroughOriginalPrice] = useState(true)
   const [originalPriceFontSize, setOriginalPriceFontSize] = useState(0.9)
-  const [originalPriceSpacing, setOriginalPriceSpacing] = useState(0.1)
+  const [originalPriceSpacing, setOriginalPriceSpacing] = useState(0)
+
+  const [printOnlyDiscounted, setPrintOnlyDiscounted] = useState(false)
 
   const [mode, setMode] = useState<"normal" | "differences">("normal")
   const [oldListInput, setOldListInput] = useState("")
@@ -112,6 +114,13 @@ export default function PriceLabelGenerator() {
         return product.name.toLowerCase().includes(search) || product.code.includes(search)
       })
   }, [products, searchTerm])
+
+  const printFilteredProducts = useMemo(() => {
+    return filteredProducts.filter(({ product }) => {
+      if (!printOnlyDiscounted) return true
+      return product.discount !== undefined && product.discount > 0
+    })
+  }, [filteredProducts, printOnlyDiscounted])
 
   const toggleProductSelection = (index: number) => {
     const newSelected = new Set(selectedProducts)
@@ -194,6 +203,21 @@ export default function PriceLabelGenerator() {
     })
     setProducts(updatedProducts)
     setSelectedProducts(new Set())
+  }
+
+  const deleteSelectedProducts = () => {
+    const updatedProducts = products.filter((_, index) => !selectedProducts.has(index))
+    setProducts(updatedProducts)
+    setSelectedProducts(new Set())
+
+    // If in differences mode, also update the differences array
+    if (mode === "differences") {
+      const updatedDifferences = differences.filter((diff) => {
+        const productIndex = products.findIndex((p) => p.code === diff.product.code)
+        return !selectedProducts.has(productIndex)
+      })
+      setDifferences(updatedDifferences)
+    }
   }
 
   const getDifferenceInfo = (productCode: string): ProductDifference | undefined => {
@@ -360,7 +384,7 @@ export default function PriceLabelGenerator() {
                         strokeLinecap="round"
                         strokeLinejoin="round"
                       >
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <path d="M21 15v4a2 2 0 0 1-2 2H7c-1 0-2-1-2-2v-4" />
                         <polyline points="7 10 12 15 17 10" />
                         <line x1="12" x2="12" y1="15" y2="3" />
                       </svg>
@@ -734,6 +758,23 @@ export default function PriceLabelGenerator() {
                   </p>
                 </div>
               )}
+
+              <div className="border-t pt-6">
+                <label className="block text-sm font-medium mb-3">Opciones de Impresión:</label>
+                <div className="flex items-center gap-3">
+                  <Checkbox
+                    id="print-only-discounted"
+                    checked={printOnlyDiscounted}
+                    onCheckedChange={(checked) => setPrintOnlyDiscounted(checked as boolean)}
+                  />
+                  <label htmlFor="print-only-discounted" className="text-sm cursor-pointer">
+                    Imprimir solo productos con descuento
+                  </label>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Cuando está activado, solo se imprimirán las etiquetas de productos que tengan descuentos aplicados
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -844,6 +885,31 @@ export default function PriceLabelGenerator() {
                   <Button onClick={removeDiscountFromSelected} variant="outline" size="lg">
                     Quitar Descuento
                   </Button>
+                  <Button
+                    onClick={deleteSelectedProducts}
+                    variant="destructive"
+                    size="lg"
+                    className="flex items-center gap-2"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M3 6h18" />
+                      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                      <line x1="10" x2="10" y1="11" y2="17" />
+                      <line x1="14" x2="14" y1="11" y2="17" />
+                    </svg>
+                    Eliminar Seleccionados
+                  </Button>
                 </div>
               </div>
             )}
@@ -922,10 +988,10 @@ export default function PriceLabelGenerator() {
                       </div>
                       <div className="text-sm">
                         {product.discount && product.originalPrice && (
-                          <span className="line-through text-muted-foreground mr-2">${product.originalPrice}</span>
+                          <span className="line-through text-muted-foreground mr-2">$ {product.originalPrice}</span>
                         )}
                         <span className={`font-bold ${product.discount ? "text-green-600" : ""}`}>
-                          ${product.price}
+                          $ {product.price}
                         </span>
                         {product.discount && (
                           <span className="ml-2 text-xs bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 px-2 py-0.5 rounded-full font-semibold">
@@ -966,8 +1032,8 @@ export default function PriceLabelGenerator() {
 
       {products.length > 0 && (
         <div className="print:block">
-          <div className="grid grid-cols-3 gap-0 p-4">
-            {filteredProducts.map(({ product, index }) => {
+          <div className="grid grid-cols-3 gap-x-0 gap-y-3 p-4">
+            {printFilteredProducts.map(({ product, index }) => {
               const diffInfo = getDifferenceInfo(product.code)
               return (
                 <div
@@ -1050,5 +1116,6 @@ export default function PriceLabelGenerator() {
         </div>
       )}
     </div>
-  )
-}
+  )}
+
+  
