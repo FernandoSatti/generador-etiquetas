@@ -961,6 +961,22 @@ export default function PriceLabelGenerator() {
                   >
                     -20% Descuento
                   </Button>
+                  <Button
+                    onClick={() => applyDiscount(25)}
+                    variant="default"
+                    size="lg"
+                    className="bg-green-600 hover:bg-green-700"
+                  >
+                    -25% Descuento
+                  </Button>
+                  <Button
+                    onClick={() => applyDiscount(30)}
+                    variant="default"
+                    size="lg"
+                    className="bg-green-600 hover:bg-green-700"
+                  >
+                    -30% Descuento
+                  </Button>
                   <Button onClick={removeDiscountFromSelected} variant="outline" size="lg">
                     Quitar Descuento
                   </Button>
