@@ -16,8 +16,9 @@ interface Product {
 
 interface ProductDifference {
   product: Product
-  changeType: "new" | "price-change"
+  changeType: "new" | "price-change" | "offer-started" | "offer-ended"
   oldPrice?: string
+  oldDiscount?: number
 }
 
 export default function PriceLabelGenerator() {
@@ -32,12 +33,11 @@ export default function PriceLabelGenerator() {
   const [labelHeight, setLabelHeight] = useState(3.5)
   const [priceFontSize, setPriceFontSize] = useState(3)
   const [nameFontSize, setNameFontSize] = useState(0.9)
+  const [originalPriceFontSize, setOriginalPriceFontSize] = useState(1)
+  const [originalPriceSpacing, setOriginalPriceSpacing] = useState(0.5)
 
   const [showOriginalPrice, setShowOriginalPrice] = useState(false)
-  const [strikethroughOriginalPrice, setStrikethroughOriginalPrice] = useState(true)
-  const [originalPriceFontSize, setOriginalPriceFontSize] = useState(0.9)
-  const [originalPriceSpacing, setOriginalPriceSpacing] = useState(0)
-
+  const [strikethrough, setStrikethrough] = useState(false)
   const [printOnlyDiscounted, setPrintOnlyDiscounted] = useState(false)
 
   const [mode, setMode] = useState<"normal" | "differences">("normal")
@@ -48,22 +48,76 @@ export default function PriceLabelGenerator() {
   const parseProducts = (text: string) => {
     const lines = text.trim().split("\n")
     const parsed: Product[] = []
+    let autoCode = 1
 
     lines.forEach((line) => {
       const trimmedLine = line.trim()
 
       if (!trimmedLine) return
 
-      const match = trimmedLine.match(/^(\d+)\s+(.+?)\s+([\d.,]+)$/)
+      // Skip lines that are just categories (all caps, short, no numbers)
+      if (trimmedLine.match(/^[A-Z\s]{2,20}$/) && !trimmedLine.match(/\d/)) {
+        return
+      }
+
+      // Parse format with DESC: "CODE NAME PRICE | DESC DISCOUNT"
+      const discountMatch = trimmedLine.match(/\|\s*DESC\s+(\d+)\s*$/)
+      const discountPercent = discountMatch ? Number.parseInt(discountMatch[1]) : undefined
+
+      // Remove discount part for main parsing
+      const mainLine = discountMatch ? trimmedLine.replace(/\s*\|\s*DESC\s+\d+\s*$/, "") : trimmedLine
+
+      // Try to parse with code: "CODE NAME PRICE"
+      let match = mainLine.match(/^(\d+)\s+(.+?)\s+([\d.,]+)$/)
+
+      // If no code, try to extract name and price without code
+      if (!match) {
+        // Try: "NAME\tPRICE" or "NAME    PRICE" (multiple spaces/tabs)
+        match = mainLine.match(/^(.+?)\s{2,}([\d.,]+)$/)
+        if (match) {
+          // Assign auto-generated code for products without code
+          const code = String(autoCode).padStart(4, "0")
+          autoCode++
+          const name = match[1].trim()
+          const priceStr = match[2]
+          const price = priceStr.replace(/,00$/, "")
+
+          const product: Product = { code, name, price }
+
+          if (discountPercent) {
+            product.originalPrice = price
+            product.discount = discountPercent
+            const numericPrice = Number.parseFloat(price.replace(/\./g, "").replace(",", "."))
+            const discountedPrice = numericPrice * (1 - discountPercent / 100)
+            product.price = Math.round(discountedPrice)
+              .toString()
+              .replace(/\B(?=(\d{3})+(?!\d))/g, ".")
+          }
+
+          parsed.push(product)
+          return
+        }
+      }
 
       if (match) {
         const code = match[1]
         const name = match[2].trim()
         const priceStr = match[3]
-
         const price = priceStr.replace(/,00$/, "")
 
-        parsed.push({ code, name, price })
+        const product: Product = { code, name, price }
+
+        if (discountPercent) {
+          product.originalPrice = price
+          product.discount = discountPercent
+          const numericPrice = Number.parseFloat(price.replace(/\./g, "").replace(",", "."))
+          const discountedPrice = numericPrice * (1 - discountPercent / 100)
+          product.price = Math.round(discountedPrice)
+            .toString()
+            .replace(/\B(?=(\d{3})+(?!\d))/g, ".")
+        }
+
+        parsed.push(product)
       }
     })
 
@@ -76,25 +130,55 @@ export default function PriceLabelGenerator() {
 
     const oldProductsMap = new Map<string, Product>()
     oldProducts.forEach((product) => {
-      oldProductsMap.set(product.code, product)
+      oldProductsMap.set(product.name.toLowerCase(), product)
     })
 
     const foundDifferences: ProductDifference[] = []
 
     newProducts.forEach((newProduct) => {
-      const oldProduct = oldProductsMap.get(newProduct.code)
+      const oldProduct = oldProductsMap.get(newProduct.name.toLowerCase())
 
       if (!oldProduct) {
         foundDifferences.push({
           product: newProduct,
           changeType: "new",
         })
-      } else if (oldProduct.price !== newProduct.price) {
-        foundDifferences.push({
-          product: newProduct,
-          changeType: "price-change",
-          oldPrice: oldProduct.price,
-        })
+      } else {
+        let hasChange = false
+        let changeType: ProductDifference["changeType"] = "price-change"
+
+        // Check for price changes
+        if (oldProduct.price !== newProduct.price) {
+          changeType = "price-change"
+          hasChange = true
+        }
+
+        // Check for discount changes
+        const oldHasDiscount = oldProduct.discount !== undefined
+        const newHasDiscount = newProduct.discount !== undefined
+
+        if (oldHasDiscount && !newHasDiscount) {
+          // Offer ended
+          changeType = "offer-ended"
+          hasChange = true
+        } else if (!oldHasDiscount && newHasDiscount) {
+          // Offer started
+          changeType = "offer-started"
+          hasChange = true
+        } else if (oldHasDiscount && newHasDiscount && oldProduct.discount !== newProduct.discount) {
+          // Discount changed
+          changeType = "offer-started"
+          hasChange = true
+        }
+
+        if (hasChange) {
+          foundDifferences.push({
+            product: newProduct,
+            changeType,
+            oldPrice: oldProduct.price,
+            oldDiscount: oldProduct.discount,
+          })
+        }
       }
     })
 
@@ -107,20 +191,20 @@ export default function PriceLabelGenerator() {
   const filteredProducts = useMemo(() => {
     const search = searchTerm.toLowerCase().trim()
 
-    return products
+    let filtered = products
       .map((product, index) => ({ product, index }))
       .filter(({ product }) => {
         if (!search) return true
         return product.name.toLowerCase().includes(search) || product.code.includes(search)
       })
-  }, [products, searchTerm])
 
-  const printFilteredProducts = useMemo(() => {
-    return filteredProducts.filter(({ product }) => {
-      if (!printOnlyDiscounted) return true
-      return product.discount !== undefined && product.discount > 0
-    })
-  }, [filteredProducts, printOnlyDiscounted])
+    // Filter by discount status if enabled
+    if (printOnlyDiscounted) {
+      filtered = filtered.filter(({ product }) => product.discount !== undefined)
+    }
+
+    return filtered
+  }, [products, searchTerm, printOnlyDiscounted])
 
   const toggleProductSelection = (index: number) => {
     const newSelected = new Set(selectedProducts)
@@ -165,6 +249,27 @@ export default function PriceLabelGenerator() {
     setSelectedProducts(new Set())
   }
 
+  const removeDiscountFromSelected = () => {
+    const updatedProducts = products.map((product, index) => {
+      if (selectedProducts.has(index) && product.discount) {
+        return {
+          code: product.code,
+          name: product.name,
+          price: product.originalPrice || product.price,
+        }
+      }
+      return product
+    })
+    setProducts(updatedProducts)
+    setSelectedProducts(new Set())
+  }
+
+  const deleteSelected = () => {
+    const updatedProducts = products.filter((_, index) => !selectedProducts.has(index))
+    setProducts(updatedProducts)
+    setSelectedProducts(new Set())
+  }
+
   const resetAll = () => {
     setInput("")
     setProducts([])
@@ -190,36 +295,6 @@ export default function PriceLabelGenerator() {
 
   const productsWithDiscount = products.filter((p) => p.discount).length
 
-  const removeDiscountFromSelected = () => {
-    const updatedProducts = products.map((product, index) => {
-      if (selectedProducts.has(index) && product.discount) {
-        return {
-          code: product.code,
-          name: product.name,
-          price: product.originalPrice || product.price,
-        }
-      }
-      return product
-    })
-    setProducts(updatedProducts)
-    setSelectedProducts(new Set())
-  }
-
-  const deleteSelectedProducts = () => {
-    const updatedProducts = products.filter((_, index) => !selectedProducts.has(index))
-    setProducts(updatedProducts)
-    setSelectedProducts(new Set())
-
-    // If in differences mode, also update the differences array
-    if (mode === "differences") {
-      const updatedDifferences = differences.filter((diff) => {
-        const productIndex = products.findIndex((p) => p.code === diff.product.code)
-        return !selectedProducts.has(productIndex)
-      })
-      setDifferences(updatedDifferences)
-    }
-  }
-
   const getDifferenceInfo = (productCode: string): ProductDifference | undefined => {
     return differences.find((d) => d.product.code === productCode)
   }
@@ -230,7 +305,13 @@ export default function PriceLabelGenerator() {
         const paddedCode = product.code.padEnd(20, " ")
         const paddedName = product.name.padEnd(45, " ")
         const priceWithDecimals = `${product.price},00`
-        return `${paddedCode}${paddedName}${priceWithDecimals}`
+        let line = `${paddedCode}${paddedName}${priceWithDecimals}`
+
+        if (product.discount) {
+          line += ` | DESC ${product.discount}`
+        }
+
+        return line
       })
       .join("\n")
 
@@ -296,7 +377,6 @@ export default function PriceLabelGenerator() {
         <div className="space-y-8">
           {mode === "normal" ? (
             <>
-              {/* Input Section */}
               <div className="bg-card border rounded-lg p-6 shadow-sm">
                 <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
                   <svg
@@ -323,7 +403,6 @@ export default function PriceLabelGenerator() {
                 />
               </div>
 
-              {/* Action Buttons */}
               <div className="flex gap-3 flex-wrap">
                 <Button onClick={handleGenerate} size="lg" className="flex items-center gap-2">
                   <svg
@@ -384,7 +463,7 @@ export default function PriceLabelGenerator() {
                         strokeLinecap="round"
                         strokeLinejoin="round"
                       >
-                        <path d="M21 15v4a2 2 0 0 1-2 2H7c-1 0-2-1-2-2v-4" />
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                         <polyline points="7 10 12 15 17 10" />
                         <line x1="12" x2="12" y1="15" y2="3" />
                       </svg>
@@ -463,7 +542,6 @@ export default function PriceLabelGenerator() {
                 </div>
               </div>
 
-              {/* Action Buttons for Differences Mode */}
               <div className="flex gap-3 flex-wrap">
                 <Button onClick={compareLists} size="lg" className="flex items-center gap-2">
                   <svg
@@ -569,28 +647,39 @@ export default function PriceLabelGenerator() {
                       strokeWidth="2"
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      className={`transition-transform ${isProductsExpanded ? "rotate-180" : ""}`}
                     >
                       <path d="m6 9 6 6 6-6" />
                     </svg>
                     Resumen de Diferencias
                   </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                     <div className="bg-white dark:bg-gray-900 rounded-lg p-4">
-                      <div className="text-sm text-muted-foreground mb-1">Total de cambios</div>
-                      <div className="text-2xl font-bold text-blue-600">{differences.length}</div>
-                    </div>
-                    <div className="bg-white dark:bg-gray-900 rounded-lg p-4">
-                      <div className="text-sm text-muted-foreground mb-1">Productos nuevos</div>
+                      <div className="text-xs text-muted-foreground mb-1">Productos nuevos</div>
                       <div className="text-2xl font-bold text-green-600">
                         {differences.filter((d) => d.changeType === "new").length}
                       </div>
                     </div>
                     <div className="bg-white dark:bg-gray-900 rounded-lg p-4">
-                      <div className="text-sm text-muted-foreground mb-1">Cambios de precio</div>
+                      <div className="text-xs text-muted-foreground mb-1">Cambios de precio</div>
                       <div className="text-2xl font-bold text-orange-600">
                         {differences.filter((d) => d.changeType === "price-change").length}
                       </div>
+                    </div>
+                    <div className="bg-white dark:bg-gray-900 rounded-lg p-4">
+                      <div className="text-xs text-muted-foreground mb-1">Ofertas iniciadas</div>
+                      <div className="text-2xl font-bold text-purple-600">
+                        {differences.filter((d) => d.changeType === "offer-started").length}
+                      </div>
+                    </div>
+                    <div className="bg-white dark:bg-gray-900 rounded-lg p-4">
+                      <div className="text-xs text-muted-foreground mb-1">Ofertas finalizadas</div>
+                      <div className="text-2xl font-bold text-red-600">
+                        {differences.filter((d) => d.changeType === "offer-ended").length}
+                      </div>
+                    </div>
+                    <div className="bg-white dark:bg-gray-900 rounded-lg p-4">
+                      <div className="text-xs text-muted-foreground mb-1">Total de cambios</div>
+                      <div className="text-2xl font-bold text-blue-600">{differences.length}</div>
                     </div>
                   </div>
                 </div>
@@ -598,7 +687,6 @@ export default function PriceLabelGenerator() {
             </>
           )}
 
-          {/* Settings Section */}
           <div className="bg-card border rounded-lg p-6 shadow-sm">
             <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
               <svg
@@ -697,7 +785,7 @@ export default function PriceLabelGenerator() {
               {mode === "normal" && (
                 <div className="border-t pt-6">
                   <label className="block text-sm font-medium mb-3">Opciones de Ofertas:</label>
-                  <div className="flex items-center gap-3 mb-3">
+                  <div className="flex items-center gap-3 mb-4">
                     <Checkbox
                       id="show-original-price"
                       checked={showOriginalPrice}
@@ -709,45 +797,42 @@ export default function PriceLabelGenerator() {
                   </div>
 
                   {showOriginalPrice && (
-                    <div className="ml-6 pl-4 border-l-2 border-muted space-y-4">
+                    <div className="space-y-3 bg-muted/30 p-3 rounded-lg">
                       <div className="flex items-center gap-3">
                         <Checkbox
-                          id="strikethrough-original"
-                          checked={strikethroughOriginalPrice}
-                          onCheckedChange={(checked) => setStrikethroughOriginalPrice(checked as boolean)}
+                          id="strikethrough"
+                          checked={strikethrough}
+                          onCheckedChange={(checked) => setStrikethrough(checked as boolean)}
                         />
-                        <label htmlFor="strikethrough-original" className="text-sm cursor-pointer">
-                          Tachar precio original
+                        <label htmlFor="strikethrough" className="text-sm cursor-pointer">
+                          Tachar el precio original
                         </label>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-xs text-muted-foreground mb-2">
-                            Tamaño precio original (rem)
-                          </label>
-                          <Input
-                            type="number"
-                            value={originalPriceFontSize}
-                            onChange={(e) => setOriginalPriceFontSize(Number(e.target.value))}
-                            min="0.3"
-                            max="2"
-                            step="0.1"
-                            className="w-full"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs text-muted-foreground mb-2">Espaciado inferior (rem)</label>
-                          <Input
-                            type="number"
-                            value={originalPriceSpacing}
-                            onChange={(e) => setOriginalPriceSpacing(Number(e.target.value))}
-                            min="0"
-                            max="1"
-                            step="0.05"
-                            className="w-full"
-                          />
-                        </div>
+                      <div>
+                        <label className="block text-xs text-muted-foreground mb-2">Tamaño precio original (rem)</label>
+                        <Input
+                          type="number"
+                          value={originalPriceFontSize}
+                          onChange={(e) => setOriginalPriceFontSize(Number(e.target.value))}
+                          min="0.3"
+                          max="2"
+                          step="0.1"
+                          className="w-full"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs text-muted-foreground mb-2">Espaciado inferior (rem)</label>
+                        <Input
+                          type="number"
+                          value={originalPriceSpacing}
+                          onChange={(e) => setOriginalPriceSpacing(Number(e.target.value))}
+                          min="0"
+                          max="2"
+                          step="0.1"
+                          className="w-full"
+                        />
                       </div>
                     </div>
                   )}
@@ -768,12 +853,9 @@ export default function PriceLabelGenerator() {
                     onCheckedChange={(checked) => setPrintOnlyDiscounted(checked as boolean)}
                   />
                   <label htmlFor="print-only-discounted" className="text-sm cursor-pointer">
-                    Imprimir solo productos con descuento
+                    Imprimir solo productos en oferta
                   </label>
                 </div>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Cuando está activado, solo se imprimirán las etiquetas de productos que tengan descuentos aplicados
-                </p>
               </div>
             </div>
           </div>
@@ -781,7 +863,6 @@ export default function PriceLabelGenerator() {
 
         {products.length > 0 && (
           <>
-            {/* Stats Section */}
             <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="bg-card border rounded-lg p-4 shadow-sm">
                 <div className="text-sm text-muted-foreground mb-1">Total de productos</div>
@@ -797,7 +878,6 @@ export default function PriceLabelGenerator() {
               </div>
             </div>
 
-            {/* Search Section */}
             <div className="mt-8 bg-card border rounded-lg p-6 shadow-sm">
               <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
                 <svg
@@ -830,7 +910,6 @@ export default function PriceLabelGenerator() {
               )}
             </div>
 
-            {/* Offers Section */}
             {selectedProducts.size > 0 && (
               <div className="mt-6 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950 dark:to-emerald-950 border-2 border-green-200 dark:border-green-800 rounded-lg p-6 shadow-sm">
                 <h2 className="text-xl font-semibold mb-3 flex items-center gap-2">
@@ -851,7 +930,7 @@ export default function PriceLabelGenerator() {
                     <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
                     <path d="M16 3.13a4 4 0 0 1 0 7.75" />
                   </svg>
-                  Aplicar Descuentos
+                  Acciones
                 </h2>
                 <p className="text-sm text-muted-foreground mb-4">
                   {selectedProducts.size} producto{selectedProducts.size !== 1 ? "s" : ""} seleccionado
@@ -886,35 +965,17 @@ export default function PriceLabelGenerator() {
                     Quitar Descuento
                   </Button>
                   <Button
-                    onClick={deleteSelectedProducts}
-                    variant="destructive"
+                    onClick={deleteSelected}
+                    variant="outline"
                     size="lg"
-                    className="flex items-center gap-2"
+                    className="text-red-600 border-red-600 hover:bg-red-50 bg-transparent"
                   >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="18"
-                      height="18"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M3 6h18" />
-                      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-                      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-                      <line x1="10" x2="10" y1="11" y2="17" />
-                      <line x1="14" x2="14" y1="11" y2="17" />
-                    </svg>
                     Eliminar Seleccionados
                   </Button>
                 </div>
               </div>
             )}
 
-            {/* Collapsible Section */}
             <div className="mt-6">
               <div className="flex gap-2 mb-2">
                 <Button
@@ -1007,7 +1068,6 @@ export default function PriceLabelGenerator() {
           </>
         )}
 
-        {/* Empty State */}
         {products.length === 0 && input === "" && mode === "normal" && (
           <div className="mt-12 text-center py-12 bg-muted/30 rounded-lg border-2 border-dashed">
             <svg
@@ -1032,8 +1092,8 @@ export default function PriceLabelGenerator() {
 
       {products.length > 0 && (
         <div className="print:block">
-          <div className="grid grid-cols-3 gap-x-0 gap-y-3 p-4">
-            {printFilteredProducts.map(({ product, index }) => {
+          <div className="grid grid-cols-3 gap-0 p-4">
+            {filteredProducts.map(({ product, index }) => {
               const diffInfo = getDifferenceInfo(product.code)
               return (
                 <div
@@ -1051,7 +1111,7 @@ export default function PriceLabelGenerator() {
                     {product.code}
                   </div>
 
-                  {product.discount && (
+                  {product.discount && mode === "normal" && (
                     <div
                       className="text-xs font-bold absolute top-1 right-2 px-1 rounded"
                       style={{
@@ -1067,25 +1127,40 @@ export default function PriceLabelGenerator() {
                     <div
                       className="text-xs font-bold absolute top-1 right-2 px-1 rounded"
                       style={{
-                        backgroundColor: diffInfo.changeType === "new" ? "#10b981" : "#f59e0b",
+                        backgroundColor:
+                          diffInfo.changeType === "new"
+                            ? "#10b981"
+                            : diffInfo.changeType === "offer-started"
+                              ? "#8b5cf6"
+                              : diffInfo.changeType === "offer-ended"
+                                ? "#ef4444"
+                                : "#f59e0b",
                         color: "#fff",
                       }}
                     >
-                      {diffInfo.changeType === "new" ? "NUEVO" : "PRECIO"}
+                      {diffInfo.changeType === "new"
+                        ? "NUEVO"
+                        : diffInfo.changeType === "price-change"
+                          ? "PRECIO"
+                          : diffInfo.changeType === "offer-started"
+                            ? "OFERTA"
+                            : diffInfo.changeType === "offer-ended"
+                              ? "SIN OFERTA"
+                              : "CAMBIO"}
                     </div>
                   )}
 
                   <div className="flex-1 flex flex-col items-center justify-center">
                     {showOriginalPrice && product.discount && product.originalPrice && (
                       <div
-                        className={`text-center mb-1 ${strikethroughOriginalPrice ? "line-through" : ""}`}
+                        className={`text-center ${strikethrough ? "line-through" : ""} mb-1`}
                         style={{
                           color: "#9ca3af",
                           fontSize: `${originalPriceFontSize}rem`,
                           marginBottom: `${originalPriceSpacing}rem`,
                         }}
                       >
-                        ${product.originalPrice}
+                        $ {product.originalPrice}
                       </div>
                     )}
                     <div
@@ -1095,7 +1170,7 @@ export default function PriceLabelGenerator() {
                         fontSize: `${priceFontSize}rem`,
                       }}
                     >
-                      ${product.price}
+                      $ {product.price}
                     </div>
                   </div>
 
@@ -1116,6 +1191,5 @@ export default function PriceLabelGenerator() {
         </div>
       )}
     </div>
-  )}
-
-  
+  )
+}
