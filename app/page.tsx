@@ -39,6 +39,7 @@ export default function PriceLabelGenerator() {
   const [showOriginalPrice, setShowOriginalPrice] = useState(false)
   const [strikethrough, setStrikethrough] = useState(false)
   const [printOnlyDiscounted, setPrintOnlyDiscounted] = useState(false)
+  const [printOnlySelected, setPrintOnlySelected] = useState(false) // added new state for print selected
 
   const [mode, setMode] = useState<"normal" | "differences">("normal")
   const [oldListInput, setOldListInput] = useState("")
@@ -319,6 +320,14 @@ export default function PriceLabelGenerator() {
       alert("Lista copiada al portapapeles! Ahora puedes pegarla en Excel o en 'Lista Antigua'")
     })
   }
+
+  const getProductsToPrint = () => {
+    if (printOnlySelected) {
+      return filteredProducts.filter(({ index }) => selectedProducts.has(index))
+    }
+    return filteredProducts
+  }
+
 
   return (
     <div className="min-h-screen bg-background">
@@ -846,15 +855,27 @@ export default function PriceLabelGenerator() {
 
               <div className="border-t pt-6">
                 <label className="block text-sm font-medium mb-3">Opciones de Impresión:</label>
-                <div className="flex items-center gap-3">
-                  <Checkbox
-                    id="print-only-discounted"
-                    checked={printOnlyDiscounted}
-                    onCheckedChange={(checked) => setPrintOnlyDiscounted(checked as boolean)}
-                  />
-                  <label htmlFor="print-only-discounted" className="text-sm cursor-pointer">
-                    Imprimir solo productos en oferta
-                  </label>
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <Checkbox
+                      id="print-only-discounted"
+                      checked={printOnlyDiscounted}
+                      onCheckedChange={(checked) => setPrintOnlyDiscounted(checked as boolean)}
+                    />
+                    <label htmlFor="print-only-discounted" className="text-sm cursor-pointer">
+                      Imprimir solo productos en oferta
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Checkbox
+                      id="print-only-selected"
+                      checked={printOnlySelected}
+                      onCheckedChange={(checked) => setPrintOnlySelected(checked as boolean)}
+                    />
+                    <label htmlFor="print-only-selected" className="text-sm cursor-pointer">
+                      Imprimir solo seleccionados
+                    </label>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1109,7 +1130,7 @@ export default function PriceLabelGenerator() {
       {products.length > 0 && (
         <div className="print:block">
           <div className="grid grid-cols-3 gap-0 p-4">
-            {filteredProducts.map(({ product, index }) => {
+            {getProductsToPrint().map(({ product, index }) => {
               const diffInfo = getDifferenceInfo(product.code)
               return (
                 <div
